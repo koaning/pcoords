@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parallel Coordinates</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        #chart {
+            position: relative;
+        }
+        canvas, svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="chart"></div>
+    <script>
+        // Generate sample data
+        const data = Array.from({ length: 20000 }, () => ({
+            F: Math.random() * 10,
+            B: Math.random() * 10,
+            C: Math.random() * 10,
+            D: Math.random() * 10,
+            E: d3.randomNormal(0, 10)(),
+            A: d3.randomNormal(0, 10)() ? Math.random() < 1 : 0,
+        }));
+
+        // Set up dimensions
+        const margin = {top: 30, right: 10, bottom: 10, left: 10};
+        const width = 960 - margin.left - margin.right;
+        const height = 500 - margin.top - margin.bottom;
+
+        // Create Canvas
+        const canvas = d3.select("#chart")
+            .append("canvas")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom);
+
+        const context = canvas.node().getContext("2d");
+        context.translate(margin.left, margin.top);
+
+        // Create SVG for axes
+        const svg = d3.select("#chart")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Extract dimensions
+        const dimensions = Object.keys(data[0]);
+
+        // Create scales
+        const y = {};
+        dimensions.forEach(d => {
+            y[d] = d3.scaleLinear()
+                .domain(d3.extent(data, p => +p[d]))
+                .range([height, 0]);
+        });
+
+        // Create x scale
+        const x = d3.scalePoint()
+            .range([0, width])
+            .padding(1)
+            .domain(dimensions);
+
+        // Add axes
+        svg.selectAll("myAxis")
+            .data(dimensions).enter()
+            .append("g")
+            .attr("transform", d => `translate(${x(d)})`)
+            .each(function(d) { d3.select(this).call(d3.axisLeft().scale(y[d])); })
+            .append("text")
+            .style("text-anchor", "middle")
+            .attr("y", -9)
+            .text(d => d)
+            .style("fill", "black");
+
+        // Function to draw a single line
+        function drawLine(d, color, lineWidth) {
+            context.beginPath();
+            dimensions.forEach((p, i) => {
+                if (i === 0) {
+                    context.moveTo(x(p), y[p](d[p]));
+                } else {
+                    context.lineTo(x(p), y[p](d[p]));
+                }
+            });
+            context.strokeStyle = color;
+            context.lineWidth = lineWidth;
+            context.stroke();
+        }
+
+        // Function to draw background lines
+        function drawBackgroundLines(opacity) {
+            data.forEach(d => {
+                drawLine(d, `rgba(105, 179, 162, ${opacity})`, 1);
+            });
+        }
+
+        let animationFrameId = null;
+
+        // Function to draw lines
+        function drawLines(selected = null) {
+            // Cancel any ongoing animation
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+
+            context.clearRect(0, 0, width, height);
+            
+            if (selected && selected.length > 0) {
+                drawBackgroundLines(0.05);
+                drawSelectedLines(selected);
+            } else {
+                drawBackgroundLines(0.5);
+            }
+        }
+
+        // Function to draw selected lines in batches
+        function drawSelectedLines(selected) {
+            const batchSize = 25;
+            let index = 0;
+            function drawNext() {
+                const end = Math.min(index + batchSize, selected.length);
+                for (let i = index; i < end; i++) {
+                    drawLine(selected[i], "rgba(255, 0, 0, 0.8)", 2);
+                }
+                index = end;
+                if (index < selected.length) {
+                    animationFrameId = requestAnimationFrame(drawNext);
+                } else {
+                    animationFrameId = null;
+                }
+            }
+            animationFrameId = requestAnimationFrame(drawNext);
+        }
+
+        // Initial draw
+        drawLines();
+
+        // Add brush
+        function brush() {
+            const actives = [];
+            svg.selectAll(".brush")
+                .each(function(d) {
+                    const scale = y[d];
+                    const brushSelection = d3.brushSelection(this);
+                    if (brushSelection) {
+                        actives.push({
+                            dimension: d,
+                            extent: brushSelection.map(scale.invert)
+                        });
+                    }
+                });
+
+            let selected = null;
+            if (actives.length > 0) {
+                selected = data.filter(d => actives.every(active => {
+                    const value = d[active.dimension];
+                    return value >= active.extent[1] && value <= active.extent[0];
+                }));
+            }
+
+            drawLines(selected);
+        }
+
+        const brushHeight = height;
+        const brushWidth = 20;
+
+        svg.selectAll("myBrush")
+            .data(dimensions)
+            .enter()
+            .append("g")
+            .attr("class", "brush")
+            .attr("transform", d => `translate(${x(d) - brushWidth / 2},0)`)
+            .each(function(d) {
+                d3.select(this).call(
+                    d3.brushY()
+                        .extent([[-brushWidth / 2, 0], [brushWidth / 2, brushHeight]])
+                        .on("brush", brush)
+                        .on("end", brush)
+                );
+            });
+    </script>
+</body>
+</html>
